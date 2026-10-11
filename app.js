@@ -51,8 +51,8 @@ function buildHierarchyFromRegistry(registry) {
     return { id: '__root__', text: 'mCODE-ORCHID', meta: {}, children: rootChildren };
 }
 
-/** Wraps a text label onto multiple short lines so it fits inside a bubble. */
-if (!text) return [''];
+function wrapBubbleLabel(text, maxLen = 15) {
+    if (!text) return [''];
     const words = String(text).split(/\s+/).flatMap(w => {
         const parts = [];
         for (let i = 0; i < w.length; i += maxLen) parts.push(w.slice(i, i + maxLen));
@@ -73,6 +73,7 @@ if (!text) return [''];
     return lines.length ? lines : [''];
 }
 
+
 /** Looks up a class's display text from the global registry, falling back to the raw id. */
 function getRegistryLabel(id) {
     const entry = window.globalNodeRegistry ? window.globalNodeRegistry[id] : null;
@@ -91,6 +92,8 @@ function getRegistryLabel(id) {
  * unreadable ring; the rest collapse into a single "+N more" bubble that opens a
  * scrollable, clickable list underneath the diagram.
  */
+
+
 const MAX_SATELLITES_PER_ROLE = 12;
 
 function renderBubbleDiagram(nodeData) {
