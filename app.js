@@ -95,6 +95,9 @@ function getRegistryLabel(id) {
 
 
 const MAX_SATELLITES_PER_ROLE = 12;
+const SUPERCLASS_LEVELS_UP = 2;       // 1 = parents only, 2 = + grandparents, 3 = ...
+const MAX_ANCESTORS_PER_LEVEL = 12;
+
 
 function renderBubbleDiagram(nodeData) {
     const container = document.getElementById('bubble-diagram-svg-container');
@@ -136,9 +139,9 @@ function renderBubbleDiagram(nodeData) {
     const satellites = [];
  
     cappedSup.forEach(id => satellites.push({
-        id, label: getRegistryLabel(id), role: 'Superclass', color: '#b2f5f7', size: 40,
-        edge: { ...SUB_EDGE, direction: 'outgoing' }
-    }));
+    id, key: `anc-${id}`, label: getRegistryLabel(id), role: 'Superclass', color: '#b2f5f7', size: 40,
+    edge: { ...SUB_EDGE, direction: 'outgoing' }
+}));
     if (overflowSup.length) satellites.push({
         id: null, label: `+${overflowSup.length} more`, role: 'Superclass', isOverflow: true,
         overflowIds: overflowSup, color: '#e2e8f0', size: 34,
@@ -164,6 +167,40 @@ function renderBubbleDiagram(nodeData) {
         overflowProps, color: '#e2e8f0', size: 34,
         edge: { direction: 'outgoing', label: 'relatesTo', dashed: false, color: '#02bac7' }
     });
+
+    // ---- Higher ancestors (level 2 and up), attached to the bubble below them ----
+const ancestorSats = [];
+const extraLinks = [];   // for ancestors shared by two children
+const seenIds = new Set([nodeData.id, ...superclassIds]);
+let frontier = cappedSup.map(id => ({ id, key: `anc-${id}` }));
+
+for (let level = 2; level <= SUPERCLASS_LEVELS_UP; level++) {
+    const next = [];
+    const added = new Map(); // parent id -> key, for this level
+    frontier.forEach(child => {
+        const entry = window.globalNodeRegistry ? window.globalNodeRegistry[child.id] : null;
+        const parents = [...new Set((entry && entry.meta && entry.meta.superclasses) || [])];
+        parents.forEach(pid => {
+            if (pid === '__root__' || pid === nodeData.id) return;
+            if (added.has(pid)) {                      // already added: just draw another edge to it
+                extraLinks.push({ from: child.key, to: added.get(pid) });
+                return;
+            }
+            if (seenIds.has(pid) || added.size >= MAX_ANCESTORS_PER_LEVEL) return;
+            const key = `anc-${pid}`;
+            seenIds.add(pid);
+            added.set(pid, key);
+            ancestorSats.push({
+                id: pid, key, anchorKey: child.key, level,
+                label: getRegistryLabel(pid), role: `Superclass L${level}`,
+                color: '#d9fbfc', size: 34,
+                edge: { ...SUB_EDGE, direction: 'outgoing' }
+            });
+            next.push({ id: pid, key });
+        });
+    });
+    frontier = next;
+}
  
     if (satellites.length === 0) {
         container.innerHTML = `<p class="bubble-empty-msg">"${centerLabel}" has no linked superclasses, subclasses, or properties to show.</p>`;
@@ -172,7 +209,7 @@ function renderBubbleDiagram(nodeData) {
  
     // ---- 2. Build simulation nodes + links ----
     const width = Math.max(container.clientWidth || 900, 700);
-    const height = 620;
+    const height = 760;
     const cx = width / 2, cy = height / 2;
     const centerRadius = 46;
     const ringRadius = Math.max(170, (satellites.length * 100) / (2 * Math.PI));
@@ -187,7 +224,7 @@ function renderBubbleDiagram(nodeData) {
     satellites.forEach((sat, i) => {
         const angle = (i / satellites.length) * 2 * Math.PI - Math.PI / 2;
         const node = {
-            ...sat, key: `sat-${i}`,
+            ...sat, key: sat.key || `sat-${i}`,
             x: cx + ringRadius * Math.cos(angle),
             y: cy + ringRadius * Math.sin(angle)
         };
@@ -199,7 +236,28 @@ function renderBubbleDiagram(nodeData) {
             sat: node, edge: sat.edge, isOverflow: !!sat.isOverflow
         });
     });
- 
+
+    const nodeByKey = new Map(nodes.map(n => [n.key, n]));
+
+ancestorSats.forEach(sat => {
+    const anchor = nodeByKey.get(sat.anchorKey);
+    if (!anchor) return;
+    // start just outside the anchor, pointing away from the center
+    const dx = anchor.x - cx, dy = anchor.y - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    const node = {
+        ...sat,
+        x: anchor.x + (dx / len) * 150 + (Math.random() - 0.5) * 30,
+        y: anchor.y + (dy / len) * 150 + (Math.random() - 0.5) * 30
+    };
+    nodes.push(node);
+    nodeByKey.set(node.key, node);
+    links.push({ source: anchor.key, target: node.key, sat: node, edge: sat.edge, isOverflow: false });
+});
+extraLinks.forEach(l => links.push({
+    source: l.from, target: l.to, edge: { ...SUB_EDGE, direction: 'outgoing' }, isOverflow: false
+}));
+    
     // Pill dimensions come from the label text
     links.forEach(l => {
         l.pillW = Math.max(36, l.edge.label.length * 5.6 + 16);
@@ -310,7 +368,8 @@ function renderBubbleDiagram(nodeData) {
     // ---- 5. Force simulation ----
     const simulation = d3.forceSimulation(nodes)
         .force('link', d3.forceLink(links).id(d => d.key)
-            .distance(d => ringRadius * 0.95).strength(0.7))
+            .distance(d => (d.source.isCenter || d.target.isCenter) ? ringRadius * 0.95 : 130)
+            .strength(0.7))
         .force('charge', d3.forceManyBody().strength(-420))
         .force('collide', d3.forceCollide().radius(d => d.size + 16).strength(0.9))
         .force('x', d3.forceX(cx).strength(0.025))
