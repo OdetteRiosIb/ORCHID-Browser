@@ -94,6 +94,7 @@ function getRegistryLabel(id) {
 const MAX_SATELLITES_PER_ROLE = 12;
 
 function renderBubbleDiagram(nodeData) {
+    alert('NEW VERSION');
     const container = document.getElementById('bubble-diagram-svg-container');
     if (!container) return;
  
